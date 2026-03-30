@@ -1,5 +1,6 @@
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.db.tables.orku_einingar import OrkuEiningar
 from app.models.orku_einingar_model import OrkuEiningarModel
 from app.db.tables.notendur_skraning import NotendurSkraning
@@ -165,13 +166,114 @@ async def insert_test_measurement_data(
 Part 1 - Service 1: Implement get_monthly_energy_flow_data()
 Query orku_maelingar and return monthly energy flow per plant and measurement type.
 '''
+def get_monthly_energy_flow_data(
+    from_date: datetime,
+    to_date: datetime,
+    db: Session
+):
+    query = '''
+        SELECT 
+            eining_heiti AS power_plant_source, 
+            CAST(EXTRACT(YEAR FROM timi) AS integer) AS year,
+            CAST(EXTRACT(MONTH FROM timi)AS integer) as month,
+            tegund_maelingar as measurement_type, 
+            SUM(gildi_kwh) AS total_kwh
+        FROM raforka_legacy.orku_maelingar
+        WHERE eining_heiti LIKE 'P%'
+        AND timi >= :from_date
+        AND timi < :to_date
+
+        GROUP BY eining_heiti, EXTRACT(YEAR FROM timi), EXTRACT(MONTH FROM timi), tegund_maelingar
+        ORDER BY eining_heiti, month ASC,total_kwh DESC;
+    '''
+
+    result = db.execute(text(query), {
+        "from_date": from_date,
+        "to_date": to_date
+    })
+    return result.mappings().all()
 
 '''
 Part 1 - Service 2: Implement get_monthly_company_usage_data()
 Query orku_maelingar and return monthly energy usage per company per plant.
 '''
+def  get_monthly_customer_usage_data(
+    from_date: datetime,
+    to_date: datetime,
+    db: Session
+):
+    query = '''
+        SELECT 
+            eining_heiti AS power_plants_sorce, 
+            CAST(EXTRACT(YEAR FROM timi) AS integer) AS year, 
+            CAST(EXTRACT(MONTH FROM timi) AS integer) AS month, 
+            notandi_heiti AS customer_name, 
+            SUM(gildi_kwh) AS total_kwh
+        FROM raforka_legacy.orku_maelingar
+        WHERE eining_heiti LIKE 'P%'
+        AND notandi_heiti IS NOT NULL
+        AND tegund_maelingar = 'Úttekt'
+        AND timi >= :from_date
+        AND timi < :to_date
+
+        GROUP BY eining_heiti, EXTRACT(YEAR FROM timi), EXTRACT(MONTH FROM timi), customer_name
+        ORDER BY eining_heiti, month ASC, customer_name ASC;
+    '''
+
+    result = db.execute(text(query), {
+        "from_date": from_date,
+        "to_date": to_date
+    })
+    return result.mappings().all()
 
 '''
 Part 1 - Service 3: Implement get_monthly_plant_loss_ratios_data()
 Query orku_maelingar and return average monthly loss ratios per plant.
 '''
+def get_monthly_plant_loss_ratios_data(
+    from_date: datetime,
+    to_date: datetime,
+    db: Session
+):
+    query = '''
+        WITH monthly_plant_totals AS (
+            SELECT 
+                eining_heiti, 
+                DATE_PART('year', timi) AS year, 
+                DATE_PART('month', timi) AS month,
+            SUM(
+            CASE WHEN tegund_maelingar = 'Framleiðsla'
+            THEN gildi_kwh
+            END
+            ) AS framleidslaSum,
+
+                SUM(
+            CASE WHEN tegund_maelingar = 'Innmötun'
+            THEN gildi_kwh
+            END) AS innmotunSum,
+
+                SUM(CASE WHEN tegund_maelingar = 'Úttekt'
+            THEN gildi_kwh
+            END) AS uttektSum
+
+            FROM raforka_legacy.orku_maelingar
+            WHERE eining_heiti LIKE 'P%'
+            AND timi >= :from_date
+            AND timi < :to_date
+            GROUP BY eining_heiti, DATE_PART('year', timi), DATE_PART('month', timi)
+    )
+
+    SELECT
+        eining_heiti AS powerPlant,
+        AVG((framleidslaSum - innmotunSum) / framleidslaSum) AS plant_to_substation_loss_ratio,
+        AVG((framleidslaSum - uttektSum) / framleidslaSum) AS total_system_loss_ratio
+        FROM monthly_plant_totals
+        GROUP BY eining_heiti
+        ORDER BY eining_heiti;
+    '''
+
+    result = db.execute(text(query), {
+        "from_date": from_date,
+        "to_date": to_date
+    })
+    return result.mappings().all()
