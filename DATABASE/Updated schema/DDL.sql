@@ -1,4 +1,6 @@
 -- Task C3
+
+
 CREATE SCHEMA raforka;
 
 CREATE TABLE raforka.orku_eining (
