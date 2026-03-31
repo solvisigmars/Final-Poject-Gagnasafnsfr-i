@@ -97,7 +97,7 @@ def get_monthly_energy_flow(
         from_date,
         to_date,
         datetime(2025, 1, 1, 0, 0),
-        datetime(2025, 1, 2, 0, 0)
+        datetime(2026, 1, 1, 0, 0)
     )
 
     results = get_monthly_energy_flow_data(from_date, to_date, db)
